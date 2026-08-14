@@ -1,0 +1,65 @@
+name: Convert WebM to MOV (HEVC Alpha)
+
+on:
+  workflow_dispatch:
+    inputs:
+      drive_url:
+        description: 'رابط ملف ZIP على Google Drive (مثال: https://drive.google.com/file/d/FILE_ID/view)'
+        required: true
+      output_name:
+        description: 'اسم ملف ZIP المخرج (مثال: mov_batch01) — بدون .zip'
+        required: true
+
+jobs:
+  convert:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install ffmpeg
+          pip3 install gdown --break-system-packages
+          ffmpeg -version | head -1
+
+      - name: Download and extract WebM files
+        env:
+          DRIVE_URL: ${{ github.event.inputs.drive_url }}
+        run: |
+          echo "⬇️ تنزيل الملف من Google Drive..."
+          cat > /tmp/extract_id.py << 'PYEOF'
+          import re, sys, os
+          url = os.environ["DRIVE_URL"]
+          m = re.search(r'/d/([a-zA-Z0-9_-]+)', url)
+          if not m:
+              m = re.search(r'id=([a-zA-Z0-9_-]+)', url)
+          if m:
+              print(m.group(1))
+          else:
+              sys.exit("Could not extract file ID from URL: " + url)
+          PYEOF
+          FILE_ID=$(python3 /tmp/extract_id.py)
+          echo "📎 FILE_ID: $FILE_ID"
+          echo "FILE_ID=$FILE_ID" >> $GITHUB_ENV
+          gdown "$FILE_ID" -O input.zip
+
+          echo "📦 فك الضغط..."
+          mkdir -p webm_3
+          unzip input.zip -d webm_3
+          echo "📂 ملفات WebM:"
+          find webm_3 -name "*.webm" | wc -l
+          du -sh webm_3/
+
+      - name: Run conversion script
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python3 convert_mac.py
+
+      - name: Upload result as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.output_name }}
+          path: mov_output/
+          retention-days: 7
